@@ -22,8 +22,15 @@ services:
       - ${OBMP_DATA_ROOT}/zk-data:/var/lib/zookeeper/data
       - ${OBMP_DATA_ROOT}/zk-log:/var/lib/zookeeper/log
     environment:
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=conf,cons,isro,mntr,ruok,stat"
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "obmp-zookeeper", "2181", "|", "grep", "imok"]
+      timeout: 10s
+      interval: 10s
+      retries: 5
+      start_period: 60s
 
   kafka:
     restart: unless-stopped
@@ -56,6 +63,12 @@ services:
       KAFKA_LOG_SEGMENT_BYTES: 1073741824
       KAFKA_MESSAGE_MAX_BYTES: 100000000
       KAFKA_LOG_CLEANER_THREADS: 2
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "obmp-kafka:29092", "--list"]
+      timeout: 10s
+      interval: 10s
+      retries: 5
+      start_period: 60s
 
   # TODO: Move comment to documentation
   # You can use SWAG and Let's Encrypt to front the Grafana HTTP port 3000 instance. Below is an example
@@ -86,13 +99,14 @@ services:
     restart: unless-stopped
     container_name: obmp-grafana
     image: grafana/grafana:11.5.2
+
     ports:
       - "3000:3000"
     volumes:
       - ${OBMP_DATA_ROOT}/grafana:/var/lib/grafana
       - ${OBMP_DATA_ROOT}/grafana/provisioning:/etc/grafana/provisioning/
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=openbmp
+      - GF_SECURITY_ADMIN_PASSWORD=${OBMP_GRAFANA_PASSWORD}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_USERS_HOME_PAGE=d/obmp-home/obmp-home
       - GF_INSTALL_PLUGINS=agenty-flowcharting-panel,grafana-piechart-panel,grafana-worldmap-panel,grafana-simple-json-datasource,vonage-status-panel
@@ -115,6 +129,12 @@ services:
       #- GF_SERVER_HTTP_PORT=3000
       #- GF_SERVER_DOMAIN=<fqdn of grafana server>
       #- GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      timeout: 10s
+      interval: 10s
+      retries: 5
+      start_period: 60s
 
   psql:
     restart: unless-stopped
@@ -135,11 +155,19 @@ services:
     command: >
       -c max_wal_size=10GB
     environment:
-      - POSTGRES_PASSWORD=openbmp
-      - POSTGRES_USER=openbmp
+      - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
+      - POSTGRES_USER=${OBMP_PSQL_USERNAME}
       - POSTGRES_DB=openbmp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${OBMP_PSQL_USERNAME} -d ${OBMP_PSQL_PASSWORD}"]
+      timeout: 10s
+      interval: 10s
+      retries: 5
+      start_period: 60s
 
   collector:
+    depends_on:
+      - kafka
     restart: unless-stopped
     container_name: obmp-collector
     image: openbmp/collector:2.2.3
@@ -155,6 +183,8 @@ services:
       - KAFKA_FQDN=obmp-kafka:29092
 
   psql-app:
+    depends_on:
+      - psql
     restart: unless-stopped
     container_name: obmp-psql-app
     image: openbmp/psql-app:2.2.2
@@ -179,8 +209,8 @@ services:
       - POSTGRES_REPORT_WINDOW='8 minute'               # default POSTGRESS window to select when building
                                                         # summary tables. For deployments that absorb large
                                                         # bursts increase the value, ex 60 minute
-      - POSTGRES_PASSWORD=openbmp
-      - POSTGRES_USER=openbmp
+      - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
+      - POSTGRES_USER=${OBMP_PSQL_USERNAME}
       - POSTGRES_DB=openbmp
       - POSTGRES_HOST=obmp-psql
       - POSTGRES_PORT=5432
@@ -199,6 +229,8 @@ services:
       - POSTGRES_DROP_stats_peer_update_counts='4 weeks'
 
   whois:
+    depends_on:
+      - psql
     restart: unless-stopped
     container_name: obmp-whois
     image: openbmp/whois:2.2.0
@@ -211,8 +243,8 @@ services:
 #    volumes:
 #      - ${OBMP_DATA_ROOT}/config:/config
     environment:
-      - POSTGRES_PASSWORD=openbmp
-      - POSTGRES_USER=openbmp
+      - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
+      - POSTGRES_USER=${OBMP_PSQL_USERNAME}
       - POSTGRES_DB=openbmp
       - POSTGRES_HOST=obmp-psql
       - POSTGRES_PORT=5432
