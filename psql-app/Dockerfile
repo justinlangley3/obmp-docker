@@ -94,6 +94,9 @@ RUN pip3 install urllib3 requests
 # Cleanup
 RUN apt-get autoremove && apt-get clean
 
+# Modify rsyslog.conf to disable the 'imklog' module
+RUN sed -i '/module(load="imklog")/s/^/#/' /etc/rsyslog.conf
+
 # Define default command.
 CMD ["/usr/sbin/run"]
 
