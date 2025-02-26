@@ -56,3 +56,4 @@ RUN apk add --no-cache bash
 
 # -- set entry point to bash and act as login (load profile)
 ENTRYPOINT /usr/local/bin/obmp-whoisd --logfile /dev/stdout -p $WHOIS_PORT -t $DB_MAX_THREADS
+
