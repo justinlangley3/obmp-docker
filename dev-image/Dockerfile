@@ -19,20 +19,25 @@ RUN apt-get update
 RUN apt-get install -y openjdk-17-jdk-headless maven
 RUN mkdir -p /usr/share/man/man1/ \
     && apt-get -y install git gcc g++ libboost-dev cmake libssl-dev libsasl2-dev \
-         curl wget libgss-dev   liblz4-dev libzstd-dev
-    # zlib1g-dev
+         curl wget libgss-dev liblz4-dev
 
 # Build/install zlib - zlib1g-dev does not work for static builds of librdkafka
 RUN cd /tmp && git clone https://github.com/madler/zlib.git \
     && cd zlib \
-    && git checkout v1.2.12 \
+    && git checkout v1.3.1 \
     && CFLAGS=-fPIC  ./configure --static \
     && make install
 
+# Build/install zstd (ensure -fPIC for static builds of librdkafka)
+RUN cd /tmp && git clone https://github.com/facebook/zstd.git \
+    && cd zstd \
+    && make CFLAGS="-fPIC" \
+    && make install
+
 # Build/install librdkafka
-RUN cd /tmp && git clone https://github.com/edenhill/librdkafka.git \
+RUN cd /tmp && git clone https://github.com/confluentinc/librdkafka.git \
     && cd librdkafka \
-    && git checkout v1.9.2 \
+    && git checkout v2.8.0 \
     && ./configure --enable-static --disable-curl \
     && make \
     && make install
@@ -44,7 +49,7 @@ RUN cd /tmp && git clone https://github.com/jbeder/yaml-cpp.git \
     && cd yaml-cpp \
     && git checkout yaml-cpp-0.7.0 \
     && mkdir build && cd build \
-    && cmake -DYAML_BUILD_SHARED_LIB=OFF .. \
+    && cmake -DYAML_BUILD_SHARED_LIB=OFF -DCMAKE_CXX_FLAGS="-Wno-error -Wno-maybe-uninitialized" .. \
     && make && make install \
     && cd /tmp
 
