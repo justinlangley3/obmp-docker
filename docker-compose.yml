@@ -1,16 +1,26 @@
 ---
 version: '3'
 volumes:
-  data-volume:
-    driver_opts:
-      type: none
-      device: ${OBMP_DATA_ROOT}/postgres/data
-      o: bind
-  ts-volume:
-    driver_opts:
-      type: none
-      device: ${OBMP_DATA_ROOT}/postgres/ts
-      o: bind
+  obmp-config:
+    name: obmp-config
+  obmp-grafana-dashboards:
+    name: obmp-grafana-dashboards
+  obmp-grafana-data:
+    name: obmp-grafana-data
+  obmp-grafana-provisioning-dashboards:
+    name: obmp-grafana-provisioning-dashboards
+  obmp-grafana-provisioning-datasources:
+    name: obmp-grafana-provisioning-datasources
+  obmp-kafka-data:
+    name: obmp-kafka-data
+  obmp-psql-data:
+    name: obmp-psql-data
+  obmp-psql-ts:
+    name: obmp-psql-ts
+  obmp-zk-data:
+    name: obmp-zk-data
+  obmp-zk-logs:
+    name: obmp-zk-logs
 
 services:
 
@@ -19,8 +29,8 @@ services:
     container_name: obmp-zookeeper
     image: confluentinc/cp-zookeeper:7.5.7
     volumes:
-      - ${OBMP_DATA_ROOT}/zk-data:/var/lib/zookeeper/data
-      - ${OBMP_DATA_ROOT}/zk-log:/var/lib/zookeeper/log
+      - obmp-zk-data:/var/lib/zookeeper/data
+      - obmp-zk-logs:/var/lib/zookeeper/log
     environment:
       KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=conf,cons,isro,mntr,ruok,stat"
       ZOOKEEPER_CLIENT_PORT: 2181
@@ -33,6 +43,8 @@ services:
       start_period: 60s
 
   kafka:
+    depends_on:
+      - zookeeper
     restart: unless-stopped
     container_name: obmp-kafka
     image: confluentinc/cp-kafka:7.5.7
@@ -40,9 +52,8 @@ services:
     # Change the mount point to where you want to store Kafka data.
     #   Normally 80GB or more
     volumes:
-      - ${OBMP_DATA_ROOT}/kafka-data:/var/lib/kafka/data
-    depends_on:
-      - zookeeper
+      - obmp-kafka-data:/var/lib/kafka/data
+
     ports:
       - "9092:9092"
     environment:
@@ -103,14 +114,16 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ${OBMP_DATA_ROOT}/grafana:/var/lib/grafana
-      - ${OBMP_DATA_ROOT}/grafana/provisioning:/etc/grafana/provisioning/
+      - obmp-grafana-data:/var/lib/grafana
+      - obmp-grafana-dashboards:/var/lib/grafana/dashboards/
+      - obmp-grafana-provisioning-dashboards:/etc/grafana/provisioning/dashboards
+      - obmp-grafana-provisioning-datasources:/etc/grafana/provisioning/datasources
     environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       - GF_SECURITY_ADMIN_PASSWORD=${OBMP_GRAFANA_PASSWORD}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_USERS_HOME_PAGE=d/obmp-home/obmp-home
-      - GF_INSTALL_PLUGINS=agenty-flowcharting-panel,grafana-piechart-panel,grafana-worldmap-panel,grafana-simple-json-datasource,vonage-status-panel
-
+      - GF_INSTALL_PLUGINS=andrewbmchugh-flow-panel,vonage-status-panel
       # TODO: Move comment block to documentation
       # The below is an example of how to enable OAuth
       #- GF_AUTH_GENERIC_OAUTH_NAME=MyCompany SSO
@@ -149,17 +162,17 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - data-volume:/var/lib/postgresql/data
-      - ts-volume:/var/lib/postgresql/ts
+      - obmp-psql-data:/var/lib/postgresql/data
+      - obmp-psql-ts:/var/lib/postgresql/ts
     # alter_job max_runtime in _timescaledb_config.bgw_job ( https://docs.timescale.com/latest/api#alter_job )
     command: >
       -c max_wal_size=10GB
     environment:
       - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
       - POSTGRES_USER=${OBMP_PSQL_USERNAME}
-      - POSTGRES_DB=openbmp
+      - POSTGRES_DB=${OBMP_PSQL_DATABASE}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${OBMP_PSQL_USERNAME} -d ${OBMP_PSQL_PASSWORD}"]
+      test: ["CMD-SHELL", "pg_isready -U ${OBMP_PSQL_USERNAME}"]
       timeout: 10s
       interval: 10s
       retries: 5
@@ -178,7 +191,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ${OBMP_DATA_ROOT}/config:/config
+      - obmp-config:/config
     environment:
       - KAFKA_FQDN=obmp-kafka:29092
 
@@ -196,7 +209,7 @@ services:
       - "9005:9005"
 
     volumes:
-      - ${OBMP_DATA_ROOT}/config:/config
+      - obmp-config:/config
     environment:
       - MEM=3                                           # Set memory to at least 2GB but ideally 4GB
       - KAFKA_FQDN=obmp-kafka:29092
@@ -211,7 +224,7 @@ services:
                                                         # bursts increase the value, ex 60 minute
       - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
       - POSTGRES_USER=${OBMP_PSQL_USERNAME}
-      - POSTGRES_DB=openbmp
+      - POSTGRES_DB=${OBMP_PSQL_DATABASE}
       - POSTGRES_HOST=obmp-psql
       - POSTGRES_PORT=5432
       - POSTGRES_DROP_peer_event_log='1 year'
@@ -241,11 +254,11 @@ services:
     ports:
       - "4300:43"
 #    volumes:
-#      - ${OBMP_DATA_ROOT}/config:/config
+#      - obmp-config:/config
     environment:
       - POSTGRES_PASSWORD=${OBMP_PSQL_PASSWORD}
       - POSTGRES_USER=${OBMP_PSQL_USERNAME}
-      - POSTGRES_DB=openbmp
+      - POSTGRES_DB=${OBMP_PSQL_DATABASE}
       - POSTGRES_HOST=obmp-psql
       - POSTGRES_PORT=5432
 
