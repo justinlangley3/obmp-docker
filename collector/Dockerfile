@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.3
 # Collector: openbmp/collector
 #
 #  Copyright (c) 2021-2022 Cisco Systems, Inc. and others.  All rights reserved.
@@ -23,53 +22,74 @@
 #                 -f obmp-docker/collector/Dockerfile -t openbmp/collector:2.2.3 -
 #
 
-# -----------------------------------------------
-# stage: Build collector
-# -----------------------------------------------
-FROM openbmp/dev-image:latest AS build
+#------------------------------------------------------------
+# Build Stage
+#------------------------------------------------------------
+FROM alpine:3.20 AS build
 
+# Copy source files
 COPY obmp-collector/ /ws
 WORKDIR /ws
 
-RUN rm -rf build && mkdir -p build && cd build \
-    && cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX:PATH=/usr ../ \
+# Install dependencies
+RUN apk update && \
+    apk add --no-cache \
+      bash binutils cmake make \
+      git gcc g++ musl libstdc++ \
+      boost-dev cyrus-sasl-dev \
+      librdkafka-dev lz4-dev \
+      openssl-dev yaml-cpp-dev \
+      zlib-dev zstd-dev
+
+# Build and install
+RUN rm -rf build && mkdir build && cd build && \
+    cmake \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      ../ \
     && make \
     && make install
 
+# Clean up unnecessary packages and caches
+RUN apk del gcc g++ cmake make git openssl-dev boost-dev cyrus-sasl-dev librdkafka-dev yaml-cpp-dev zlib-dev zstd-dev && \
+    rm -rf /var/cache/apk/* /tmp/*
 
-# -----------------------------------------------
-# stage: Final container
-# -----------------------------------------------
-# Pull base image.
-FROM debian:stable-slim
+#------------------------------------------------------------
+# Final Stage
+#------------------------------------------------------------
+FROM alpine:3.20
 
-# Add files.
-ADD --chmod=755 obmp-docker/collector/scripts/install /tmp/
-ADD --chmod=755 obmp-docker/collector/scripts/run /usr/sbin/
+# Install runtime dependencies
+RUN apk update && \
+    apk add --no-cache \
+      bash iproute2 cyrus-sasl \
+      libgcc librdkafka libstdc++ \
+      openssl yaml-cpp zlib && \
+    # Clean apk cache
+    rm -rf /var/cache/apk/*
 
-ARG VERSION=0
+RUN mkdir -p /usr/etc/openbmp /usr/local/bin
 
-# Copy files from previous stages
-COPY --chmod=755 --from=build /usr/bin/openbmpd /usr/bin/
+# Copy necessary files from the build stage
+COPY --from=build /usr/bin/openbmpd /usr/local/bin/
 COPY --from=build /usr/etc/openbmp/openbmpd.conf /usr/etc/openbmp/openbmpd.conf
 
-# Proxy servers
-#ENV http_proxy http://proxy:80
-#ENV https_proxy http://proxy:80
-#ENV no_proxy "domain.com"
+# Set up versioning and default configurations
+ARG VERSION=0
+RUN touch /usr/local/version-${VERSION} && \
+    mkdir -p /etc/default && \
+    touch /etc/default/openbmpd && \
+    chmod 644 /etc/default/openbmpd
 
-# Run Install script
-RUN /tmp/install
+# Add the run script
+ADD --chmod=755 obmp-docker/collector/scripts/run /usr/local/bin
 
-# Define mount points.
+# Define configuration volume
 VOLUME ["/config"]
 
-# Define working directory.
 WORKDIR /tmp
 
-# Define default command.
-CMD ["/usr/sbin/run"]
+CMD ["/usr/local/bin/run"]
 
-# Expose ports.
-# openbmpd/collector
-EXPOSE 5000         
+# Expose required ports
+EXPOSE 5000

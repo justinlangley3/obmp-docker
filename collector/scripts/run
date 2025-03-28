@@ -1,10 +1,4 @@
 #!/bin/bash
-# All-in-One run script
-#
-# Copyright (c) 2021 Cisco Systems, Inc. and Tim Evens.  All rights reserved.
-#
-# Author: Tim Evens <tim@openbmp.org>
-#
 ADMIN_ID=${ADMIN_ID:="collector"}
 
 DOCKER_HOST_IP=$(ip route | grep default | head -1 | awk '{ print $3}')
@@ -67,4 +61,4 @@ sleep 30
 # Start openbmpd and wait - openbmpd runs in foreground
 
 echo "Running openbmpd collector, see /var/log/openbmpd.log "
-/usr/bin/openbmpd -f -c ${OPENBMP_CFG_FILE}
+/usr/local/bin/openbmpd -f -c ${OPENBMP_CFG_FILE}

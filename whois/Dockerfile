@@ -11,7 +11,7 @@
 # -----------------------------------------------
 # stage: Build
 # -----------------------------------------------
-FROM golang:alpine AS build
+FROM golang:alpine3.21 AS build
 
 WORKDIR /ws
 
@@ -26,13 +26,13 @@ RUN apk add --no-cache bash git
 RUN cd /ws && go mod tidy
 
 # Build the app
-RUN cd /ws && go build -o obmp-whoisd .
+RUN cd /ws && go build -buildvcs=false -o obmp-whoisd .
 
 
 # -----------------------------------------------
 # stage: Final container
 # -----------------------------------------------
-FROM alpine
+FROM alpine:3.21
 
 COPY --from=build  /ws/obmp-whoisd /usr/local/bin/
 
@@ -56,4 +56,3 @@ RUN apk add --no-cache bash
 
 # -- set entry point to bash and act as login (load profile)
 ENTRYPOINT /usr/local/bin/obmp-whoisd --logfile /dev/stdout -p $WHOIS_PORT -t $DB_MAX_THREADS
-

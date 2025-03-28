@@ -8,51 +8,40 @@
 #
 # BUILD: docker buildx build  --platform linux/amd64 --progress=plain -t openbmp/dev-image:latest .
 
-FROM debian:stable-slim AS build
+# --------------------------------------------------------
+# Base Development Image: Install Development Tools and Libraries
+# --------------------------------------------------------
+FROM alpine:3.20 AS dev-image
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-WORKDIR /ws
-
-# Install the various depends
-RUN apt-get update
-RUN apt-get install -y openjdk-17-jdk-headless maven
-RUN mkdir -p /usr/share/man/man1/ \
-    && apt-get -y install git gcc g++ libboost-dev cmake libssl-dev libsasl2-dev \
-         curl wget libgss-dev liblz4-dev
-
-# Build/install zlib - zlib1g-dev does not work for static builds of librdkafka
-RUN cd /tmp && git clone https://github.com/madler/zlib.git \
-    && cd zlib \
-    && git checkout v1.3.1 \
-    && CFLAGS=-fPIC  ./configure --static \
-    && make install
-
-# Build/install zstd (ensure -fPIC for static builds of librdkafka)
-RUN cd /tmp && git clone https://github.com/facebook/zstd.git \
-    && cd zstd \
-    && make CFLAGS="-fPIC" \
-    && make install
-
-# Build/install librdkafka
-RUN cd /tmp && git clone https://github.com/confluentinc/librdkafka.git \
-    && cd librdkafka \
-    && git checkout v2.8.0 \
-    && ./configure --enable-static --disable-curl \
-    && make \
-    && make install
-
-# Installed under /usr/local/lib
-
-# Build/install yaml-cpp
-RUN cd /tmp && git clone https://github.com/jbeder/yaml-cpp.git \
-    && cd yaml-cpp \
-    && git checkout yaml-cpp-0.7.0 \
-    && mkdir build && cd build \
-    && cmake -DYAML_BUILD_SHARED_LIB=OFF -DCMAKE_CXX_FLAGS="-Wno-error -Wno-maybe-uninitialized" .. \
-    && make && make install \
-    && cd /tmp
-
-# Clean up
-RUN rm -rf /tmp/* && apt-get clean
-
+# Install development dependencies (use minimal packages for dev environment)
+RUN apk update && apk add --no-cache \
+    bash \
+    git \
+    cmake \
+    make \
+    gcc \
+    g++ \
+    musl-dev \
+    libstdc++ \
+    boost-dev \
+    cyrus-sasl-dev \
+    librdkafka-dev \
+    lz4-dev \
+    openssl-dev \
+    yaml-cpp-dev \
+    zlib-dev \
+    zstd-dev \
+    py3-pip \
+    py3-dnspython \
+    py3-click \
+    py3-ipaddr \
+    py3-netaddr \
+    py3-psycopg2 \
+    py3-requests \
+    py3-urllib3 \
+    postgresql14-client \
+    rsyslog \
+    curl \
+    kafkacat \
+    python3 \
+    openjdk17-jdk openjdk17-jre

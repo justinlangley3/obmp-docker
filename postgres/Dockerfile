@@ -23,7 +23,7 @@
 # -----------------------------------------------
 # stage: Final container
 # -----------------------------------------------
-FROM timescale/timescaledb-ha:pg14-ts2.18
+FROM timescale/timescaledb-ha:pg14.17-ts2.19.0
 
 ARG VERSION=0.0.0
 

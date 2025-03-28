@@ -1,102 +1,91 @@
-# syntax=docker/dockerfile:1.3
-# Postgres Backend: openbmp/psql-app
-#
-# Copyright (c) 2021-2022 Cisco Systems, Inc. and others.  All rights reserved.
-#
-# Author: Tim Evens <tim@openbmp.org>
-#
-#   Docker context does not support multiple paths or mounting volumes for builds.
-#   In effort to build the container from local git clones, we dynamically build a context
-#
-#   Clone the obmp-psql, obmp-java-api-message, and obmp-docker repos into the same directory.
-#   Change directories to obmp-docker/psql-app and run the below from that
-#   directory.
-#
 # Use buildkit - either via export DOCKER_BUILDKIT=1 or by using buildx cli
 #
-#   Example docker build:
-#     tar -c -C ../../ ./obmp-psql ./obmp-docker/psql-app ./obmp-java-api-message \
-#           | docker buildx build --platform linux/amd64 --progress=plain \
-#                 --build-arg VERSION=2.2.2 \
-#                 -f obmp-docker/psql-app/Dockerfile -t openbmp/psql-app:2.2.2 -
+# Example docker build:
+# tar -c -C ../../ ./obmp-psql ./obmp-docker/psql-app ./obmp-java-api-message \
+#     | docker buildx build --platform linux/amd64 --progress=plain \
+#         --build-arg VERSION=2.2.2 \
+#         -f obmp-docker/psql-app/Dockerfile -t openbmp/psql-app:2.2.2 -
 
 # -----------------------------------------------
-# stage: Build
-# -----------------------------------------------
-FROM openbmp/dev-image:latest AS build
+# Build Stage: Build the Java application
+# ----------------------------------------------
+FROM alpine:3.20 AS build
 
 ARG VERSION=0.0.0
 
-# Proxy servers
-#ENV http_proxy http://proxy:80
-#ENV https_proxy http://proxy:80
-#ENV no_proxy "domain.com"
+# Install build dependencies (Java JDK and Maven)
+RUN apk update && apk add --no-cache \
+    openjdk17-jdk maven
 
+# Copy source code
 COPY obmp-psql/ /ws
 COPY obmp-java-api-message/ /tmp/obmp-java-api-message
+
 WORKDIR /ws
 
-RUN cd /tmp/obmp-java-api-message \
-    && mvn clean install \
-    && cd /ws \
-    && mvn clean package
+# Build the Java application
+RUN cd /tmp/obmp-java-api-message && mvn clean install && \
+    cd /ws && mvn clean package
+
+# Clean up build dependencies to keep image small
+RUN apk del openjdk17-jdk maven && \
+    rm -rf /var/cache/apk/* /root/.m2
 
 # -----------------------------------------------
-# stage: Final container
+# Final Image: Install runtime dependencies
 # -----------------------------------------------
-FROM openjdk:17-slim
+FROM alpine:3.20
 
-# Copy files from previous stages
+# Install runtime dependencies
+RUN apk update && apk add --no-cache \
+    bash \
+    cronie \
+    curl \
+    kafkacat \
+    openjdk17-jre \
+    py3-dnspython \
+    py3-click \
+    py3-ipaddr \
+    py3-netaddr \
+    py3-pip \
+    py3-psycopg2 \
+    py3-requests \
+    py3-urllib3 \
+    postgresql14-client \
+    rsync \
+    rsyslog \
+    whois \
+    unzip && \
+    rm -rf /var/cache/apk/*
+
+# Install additional Python dependencies
+RUN pip3 install --break-system-packages pykafka
+
+# Disable unneeded rsyslog module to save space
+RUN sed -i '/module(load="imklog")/s/^/#/' /etc/rsyslog.conf
+
+# Ensure cron and rsyslog directories exist
+RUN mkdir -p /var/spool/cron/crontabs && chmod -R 600 /var/spool/cron/crontabs \
+    && mkdir -p /var/log/ && touch /var/log/cron.log /var/log/syslog /var/log/openbmpd.log
+
+# Copy built artifacts from the build stage
 COPY --from=build /ws/target/obmp-psql-consumer-0.1.0-SNAPSHOT.jar /usr/local/openbmp/obmp-psql-consumer.jar
-COPY --from=build /ws/database/  /usr/local/openbmp/database
-COPY  --chmod=755 --from=build /ws/cron_scripts/gen-whois/*.py /usr/local/openbmp/
-COPY  --chmod=755 --from=build /ws/cron_scripts/peeringdb/*.py /usr/local/openbmp/
-COPY  --chmod=755 --from=build /ws/cron_scripts/rpki/*.py /usr/local/openbmp/
-COPY  --chmod=755 --from=build /ws/scripts/geo-csv-to-psql.py /usr/local/openbmp/
-COPY  --chmod=755 --from=build /ws/scripts/db-ip-import.sh /usr/local/openbmp/
+COPY --from=build /ws/database/ /usr/local/openbmp/database
+COPY --from=build /ws/cron_scripts/gen-whois/*.py /usr/local/openbmp/
+COPY --from=build /ws/cron_scripts/peeringdb/*.py /usr/local/openbmp/
+COPY --from=build /ws/cron_scripts/rpki/*.py /usr/local/openbmp/
+COPY --from=build /ws/scripts/geo-csv-to-psql.py /usr/local/openbmp/
+COPY --from=build /ws/scripts/db-ip-import.sh /usr/local/openbmp/
 
-# Add files
-ADD  --chmod=755 obmp-docker/psql-app/scripts/run /usr/sbin/
+# Add necessary scripts and binaries for runtime
+ADD --chmod=755 obmp-docker/psql-app/scripts/start-services /usr/local/bin
 COPY --chmod=755 obmp-docker/psql-app/upgrade /tmp/upgrade
 
-#----------------------------------
 # Define persistent data volumes
 VOLUME ["/config"]
 
-#----------------------------------
-# Expose ports.
-
-# Consumer JMX console
+# Expose necessary ports
 EXPOSE 9005
 
-#----------------------------------
-# Define working directory.
-WORKDIR /tmp
-
-# Base setup tasks
-RUN touch /usr/local/version-${VERSION} \
-    && chmod 755 /usr/local/openbmp/*.py
-
-#----------------------------------
-# Install depends
-RUN apt-get update \
-    && apt-get install --allow-unauthenticated -y unzip curl wget whois vim rsyslog cron rsync kafkacat \
-        procps python3-minimal python3-distutils python3-psycopg2  python3-dnspython postgresql-client \
-    && ln -s /usr/bin/python3 /usr/bin/python
-
-RUN cd /tmp && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py \
-    && python3 get-pip.py
-
-RUN pip install ipaddr pykafka click netaddr
-
-RUN pip3 install urllib3 requests
-
-# Cleanup
-RUN apt-get autoremove && apt-get clean
-
-# Modify rsyslog.conf to disable the 'imklog' module
-RUN sed -i '/module(load="imklog")/s/^/#/' /etc/rsyslog.conf
-
-# Define default command.
-CMD ["/usr/sbin/run"]
-
+# Default command to start services
+CMD ["/usr/local/bin/start-services"]
